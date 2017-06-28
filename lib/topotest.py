@@ -29,6 +29,7 @@ import sys
 import glob
 import StringIO
 import subprocess
+import tempfile
 import platform
 import difflib
 
@@ -40,6 +41,25 @@ from mininet.cli import CLI
 from mininet.link import Intf
 
 from time import sleep
+
+def run_and_expect(func, what, count=20, wait=3):
+    """
+    Run `func` and compare the result with `what`. Do it for `count` times
+    waiting `wait` seconds between tries. By default it tries 20 times with
+    3 seconds delay between tries.
+
+    Returns (True, func-return) on success or
+    (False, func-return) on failure.
+    """
+    while count > 0:
+        result = func()
+        if result != what:
+            sleep(wait)
+            count -= 1
+            continue
+        return (True, result)
+    return (False, result)
+
 
 def int2dpid(dpid):
     "Converting Integer to DPID"
@@ -83,6 +103,22 @@ def get_textdiff(text1, text2, title1="", title2=""):
     diff = os.linesep.join([s for s in diff.splitlines() if s])
     return diff
 
+def difflines(text1, text2, title1='', title2=''):
+    "Wrapper for get_textdiff to avoid string transformations."
+    text1 = ('\n'.join(text1.rstrip().splitlines()) + '\n').splitlines(1)
+    text2 = ('\n'.join(text2.rstrip().splitlines()) + '\n').splitlines(1)
+    return get_textdiff(text1, text2, title1, title2)
+
+def get_file(content):
+    """
+    Generates a temporary file in '/tmp' with `content` and returns the file name.
+    """
+    fde = tempfile.NamedTemporaryFile(mode='w', delete=False)
+    fname = fde.name
+    fde.write(content)
+    fde.close()
+    return fname
+
 def checkAddressSanitizerError(output, router, component):
     "Checks for AddressSanitizer in output. If found, then logs it and returns true, false otherwise"
 
@@ -114,48 +150,88 @@ def addRouter(topo, name):
                          '/var/log']
     return topo.addNode(name, cls=Router, privateDirs=MyPrivateDirs)
 
+def set_sysctl(node, sysctl, value):
+    "Set a sysctl value and return None on success or an error string"
+    valuestr = '{}'.format(value)
+    command = "sysctl {0}={1}".format(sysctl, valuestr)
+    cmdret = node.cmd(command)
+
+    matches = re.search(r'([^ ]+) = ([^\s]+)', cmdret)
+    if matches is None:
+        return cmdret
+    if matches.group(1) != sysctl:
+        return cmdret
+    if matches.group(2) != valuestr:
+        return cmdret
+
+    return None
+
+def assert_sysctl(node, sysctl, value):
+    "Set and assert that the sysctl is set with the specified value."
+    assert set_sysctl(node, sysctl, value) is None
+
 class LinuxRouter(Node):
     "A Node with IPv4/IPv6 forwarding enabled."
 
     def config(self, **params):
         super(LinuxRouter, self).config(**params)
         # Enable forwarding on the router
-        self.cmd('sysctl net.ipv4.ip_forward=1')
-        self.cmd('sysctl net.ipv6.conf.all.forwarding=1')
+        assert_sysctl(self, 'net.ipv4.ip_forward', 1)
+        assert_sysctl(self, 'net.ipv6.conf.all.forwarding', 1)
     def terminate(self):
         """
         Terminate generic LinuxRouter Mininet instance
         """
-        self.cmd('sysctl net.ipv4.ip_forward=0')
-        self.cmd('sysctl net.ipv6.conf.all.forwarding=0')
+        set_sysctl(self, 'net.ipv4.ip_forward', 0)
+        set_sysctl(self, 'net.ipv6.conf.all.forwarding', 0)
         super(LinuxRouter, self).terminate()
 
 class Router(Node):
     "A Node with IPv4/IPv6 forwarding enabled and Quagga as Routing Engine"
 
+    def __init__(self, name, **params):
+        super(Router, self).__init__(name, **params)
+        self.daemondir = None
+        self.routertype = 'frr'
+        self.daemons = {'zebra': 0, 'ripd': 0, 'ripngd': 0, 'ospfd': 0,
+                        'ospf6d': 0, 'isisd': 0, 'bgpd': 0, 'pimd': 0,
+                        'ldpd': 0}
+
+    # pylint: disable=W0221
+    # Some params are only meaningful for the parent class.
     def config(self, **params):
         super(Router, self).config(**params)
 
-        # Check if Quagga or FRR is installed
-        if os.path.isfile('/usr/lib/frr/zebra'):
-            self.routertype = 'frr'
-        elif os.path.isfile('/usr/lib/quagga/zebra'):
-            self.routertype = 'quagga'
+        # User did not specify the daemons directory, try to autodetect it.
+        self.daemondir = params.get('daemondir')
+        if self.daemondir is None:
+            self.daemondir = '/usr/lib/frr'
+            if not os.path.isfile(os.path.join(self.daemondir, 'zebra')):
+                self.daemondir = '/usr/lib/quagga'
+                self.routertype = 'quagga'
+                if not os.path.isfile(os.path.join(self.daemondir, 'zebra')):
+                    raise Exception('No FRR or Quagga binaries found')
         else:
-            raise Exception('No FRR or Quagga found in ususal location')
+            # Test the provided path
+            zpath = os.path.join(self.daemondir, 'zebra')
+            if not os.path.isfile(zpath):
+                raise Exception('No zebra binary found in {}'.format(zpath))
+            # Allow user to specify routertype when the path was specified.
+            if params.get('routertype') is not None:
+                self.routertype = self.params.get('routertype')
+
         # Enable forwarding on the router
-        self.cmd('sysctl net.ipv4.ip_forward=1')
-        self.cmd('sysctl net.ipv6.conf.all.forwarding=1')
+        assert_sysctl(self, 'net.ipv4.ip_forward', 1)
+        assert_sysctl(self, 'net.ipv6.conf.all.forwarding', 1)
         # Enable coredumps
-        self.cmd('sysctl kernel.core_uses_pid=1')
-        self.cmd('sysctl fs.suid_dumpable=2')
-        self.cmd("sysctl kernel.core_pattern=/tmp/%s_%%e_core-sig_%%s-pid_%%p.dmp" % self.name)
+        assert_sysctl(self, 'kernel.core_uses_pid', 1)
+        assert_sysctl(self, 'fs.suid_dumpable', 2)
+        corefile = '/tmp/{0}_%e_core-sig_%s-pid_%p.dmp'.format(self.name)
+        assert_sysctl(self, 'kernel.core_pattern', corefile)
         self.cmd('ulimit -c unlimited')
         # Set ownership of config files
-        self.cmd('chown %s:%svty /etc/%s' % (self.routertype, self.routertype, self.routertype))
-        self.daemons = {'zebra': 0, 'ripd': 0, 'ripngd': 0, 'ospfd': 0,
-                        'ospf6d': 0, 'isisd': 0, 'bgpd': 0, 'pimd': 0, 
-                        'ldpd': 0}
+        self.cmd('chown {0}:{0}vty /etc/{0}'.format(self.routertype))
+
     def terminate(self):
         # Delete Running Quagga or FRR Daemons
         self.stopRouter()
@@ -164,8 +240,8 @@ class Router(Node):
         #     self.cmd('kill -7 `cat %s`' % d.rstrip())
         #     self.waitOutput()
         # Disable forwarding
-        self.cmd('sysctl net.ipv4.ip_forward=0')
-        self.cmd('sysctl net.ipv6.conf.all.forwarding=0')
+        set_sysctl(self, 'net.ipv4.ip_forward', 0)
+        set_sysctl(self, 'net.ipv6.conf.all.forwarding', 0)
         super(Router, self).terminate()
     def stopRouter(self):
         # Stop Running Quagga or FRR Daemons
@@ -209,7 +285,8 @@ class Router(Node):
         # If ldp is used, check for LDP to be compiled and Linux Kernel to be 4.5 or higher
         # No error - but return message and skip all the tests
         if self.daemons['ldpd'] == 1:
-            if not os.path.isfile('/usr/lib/%s/ldpd' % self.routertype):
+            ldpd_path = os.path.join(self.daemondir, 'ldpd')
+            if not os.path.isfile(ldpd_path):
                 print("LDP Test, but no ldpd compiled or installed")
                 return "LDP Test, but no ldpd compiled or installed"
             kernel_version = re.search(r'([0-9]+)\.([0-9]+).*', platform.release())
@@ -219,8 +296,7 @@ class Router(Node):
                    (float(kernel_version.group(1)) == 4 and float(kernel_version.group(2)) < 5)):
                     print("LDP Test need Linux Kernel 4.5 minimum")
                     return "LDP Test need Linux Kernel 4.5 minimum"
-        # Add mpls modules to kernel if we use LDP
-        if self.daemons['ldpd'] == 1:
+
             self.cmd('/sbin/modprobe mpls-router')
             self.cmd('/sbin/modprobe mpls-iptunnel')
             self.cmd('echo 100000 > /proc/sys/net/mpls/platform_labels')
@@ -231,8 +307,10 @@ class Router(Node):
         # Starts actuall daemons without init (ie restart)
         # Start Zebra first
         if self.daemons['zebra'] == 1:
-#            self.cmd('/usr/lib/%s/zebra -d' % self.routertype)
-            self.cmd('/usr/lib/%s/zebra > /tmp/%s-zebra.out 2> /tmp/%s-zebra.err &' % (self.routertype, self.name, self.name))
+            zebra_path = os.path.join(self.daemondir, 'zebra')
+            self.cmd('{0} > /tmp/{1}-zebra.out 2> /tmp/{1}-zebra.err &'.format(
+                zebra_path, self.name
+            ))
             self.waitOutput()
             print('%s: %s zebra started' % (self, self.routertype))
             sleep(1)
@@ -241,11 +319,16 @@ class Router(Node):
         self.cmd('for i in `ls /sys/class/net/` ; do mac=`cat /sys/class/net/$i/address`; IFS=\':\'; set $mac; unset IFS; ip address add dev $i scope link fe80::$(printf %02x $((0x$1 ^ 2)))$2:${3}ff:fe$4:$5$6/64; done')
         # Now start all the other daemons
         for daemon in self.daemons:
-            if (self.daemons[daemon] == 1) and (daemon != 'zebra'):
-#                self.cmd('/usr/lib/%s/%s -d' % (self.routertype, daemon))
-                self.cmd('/usr/lib/%s/%s > /tmp/%s-%s.out 2> /tmp/%s-%s.err &' % (self.routertype, daemon, self.name, daemon, self.name, daemon))
-                self.waitOutput()
-                print('%s: %s %s started' % (self, self.routertype, daemon))
+            # Skip disabled daemons and zebra
+            if self.daemons[daemon] == 0 or daemon == 'zebra':
+                continue
+
+            daemon_path = os.path.join(self.daemondir, daemon)
+            self.cmd('{0} > /tmp/{1}-{2}.out 2> /tmp/{1}-{2}.err &'.format(
+                daemon_path, self.name, daemon
+            ))
+            self.waitOutput()
+            print('%s: %s %s started' % (self, self.routertype, daemon))
     def getStdErr(self, daemon):
         return self.getLog('err', daemon)
     def getStdOut(self, daemon):
@@ -268,7 +351,10 @@ class Router(Node):
                 # Look for core file
                 corefiles = glob.glob("/tmp/%s_%s_core*.dmp" % (self.name, daemon))
                 if (len(corefiles) > 0):
-                    backtrace = subprocess.check_output(["gdb /usr/lib/%s/%s %s --batch -ex bt 2> /dev/null"  % (self.routertype, daemon, corefiles[0])], shell=True)
+                    daemon_path = os.path.join(self.daemondir, daemon)
+                    backtrace = subprocess.check_output([
+                        "gdb {} {} --batch -ex bt 2> /dev/null".format(daemon_path, corefiles[0])
+                    ], shell=True)
                     sys.stderr.write("\n%s: %s crashed. Core file found - Backtrace follows:\n" % (self.name, daemon))
                     sys.stderr.write("%s\n" % backtrace)
                 else:
@@ -311,7 +397,8 @@ class Router(Node):
     def daemon_available(self, daemon):
         "Check if specified daemon is installed (and for ldp if kernel supports MPLS)"
 
-        if not os.path.isfile('/usr/lib/%s/%s' % (self.routertype, daemon)):
+        daemon_path = os.path.join(self.daemondir, daemon)
+        if not os.path.isfile(daemon_path):
             return False
         if (daemon == 'ldpd'):
             kernel_version = re.search(r'([0-9]+)\.([0-9]+).*', platform.release())
