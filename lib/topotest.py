@@ -91,9 +91,50 @@ def json_cmp(d1, d2, reason=False):
                 continue
             # If nd1 key is a dict, we have to recurse in it later.
             if isinstance(nd2[key], type({})):
+                if not isinstance(nd1[key], type({})):
+                    result.add_error(
+                        '{}["{}"] has different type than expected '.format(parent, key) +
+                        '(have {}, expected {})'.format(type(nd1[key]), type(nd2[key])))
+                    continue
                 nparent = '{}["{}"]'.format(parent, key)
                 squeue.append((nd1[key], nd2[key], nparent))
                 continue
+            # Check list items
+            if isinstance(nd2[key], type([])):
+                if not isinstance(nd1[key], type([])):
+                    result.add_error(
+                        '{}["{}"] has different type than expected '.format(parent, key) +
+                        '(have {}, expected {})'.format(type(nd1[key]), type(nd2[key])))
+                    continue
+                # Check list size
+                if len(nd2[key]) > len(nd1[key]):
+                    result.add_error(
+                        '{}["{}"] too few items '.format(parent, key) +
+                        '(have ({}) "{}", expected ({}) "{}")'.format(
+                            len(nd1[key]), str(nd1[key]), len(nd2[key]), str(nd2[key])))
+                    continue
+
+                # List all unmatched items errors
+                unmatched = []
+                for expected in nd2[key]:
+                    matched = False
+                    for value in nd1[key]:
+                        if json_cmp({'json': value}, {'json': expected}) is None:
+                            matched = True
+                            break
+
+                    if matched:
+                        break
+                    if not matched:
+                        unmatched.append(expected)
+
+                # If there are unmatched items, error out.
+                if unmatched:
+                    result.add_error(
+                        '{}["{}"] value is different (have "{}", expected "{}")'.format(
+                            parent, key, str(nd1[key]), str(nd2[key])))
+                continue
+
             # Compare JSON values
             if nd1[key] != nd2[key]:
                 result.add_error(
@@ -182,6 +223,69 @@ def get_file(content):
     fde.write(content)
     fde.close()
     return fname
+
+def normalize_text(text):
+    """
+    Strips formating spaces/tabs and carriage returns.
+    """
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\r', '', text)
+    return text
+
+def version_cmp(v1, v2):
+    """
+    Compare two version strings and returns:
+
+    * `-1`: if `v1` is less than `v2`
+    * `0`: if `v1` is equal to `v2`
+    * `1`: if `v1` is greater than `v2`
+
+    Raises `ValueError` if versions are not well formated.
+    """
+    vregex = r'(?P<whole>\d+(\.(\d+))*)'
+    v1m = re.match(vregex, v1)
+    v2m = re.match(vregex, v2)
+    if v1m is None or v2m is None:
+        raise ValueError("got a invalid version string")
+
+    # Split values
+    v1g = v1m.group('whole').split('.')
+    v2g = v2m.group('whole').split('.')
+
+    # Get the longest version string
+    vnum = len(v1g)
+    if len(v2g) > vnum:
+        vnum = len(v2g)
+
+    # Reverse list because we are going to pop the tail
+    v1g.reverse()
+    v2g.reverse()
+    for _ in range(vnum):
+        try:
+            v1n = int(v1g.pop())
+        except IndexError:
+            while v2g:
+                v2n = int(v2g.pop())
+                if v2n > 0:
+                    return -1
+            break
+
+        try:
+            v2n = int(v2g.pop())
+        except IndexError:
+            if v1n > 0:
+                return 1
+            while v1g:
+                v1n = int(v1g.pop())
+                if v1n > 0:
+                    return -1
+            break
+
+        if v1n > v2n:
+            return 1
+        if v1n < v2n:
+            return -1
+    return 0
 
 def checkAddressSanitizerError(output, router, component):
     "Checks for AddressSanitizer in output. If found, then logs it and returns true, false otherwise"
