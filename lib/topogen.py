@@ -109,7 +109,8 @@ class Topogen(object):
         self.routern = 1
         self.switchn = 1
         self.modname = modname
-        self.errors = {}
+        self.errorsd = {}
+        self.errors = ''
         self.peern = 1
         self._init_topo(cls)
         logger.info('loading topology: {}'.format(self.modname))
@@ -357,13 +358,14 @@ class Topogen(object):
 
         # If no code is defined use a sequential number
         if code is None:
-            code = len(self.errors)
+            code = len(self.errorsd)
 
-        self.errors[code] = message
+        self.errorsd[code] = message
+        self.errors += '\n{}: {}'.format(code, message)
 
     def has_errors(self):
         "Returns whether errors exist or not."
-        return len(self.errors) > 0
+        return len(self.errorsd) > 0
 
     def routers_have_failure(self):
         "Runs an assertion to make sure that all routers are running."
@@ -622,6 +624,9 @@ class TopoRouter(TopoGear):
             self.vtysh_cmd('configure terminal\nlog file {}/{}-{}.log'.format(
                 self.logdir, self.name, daemon), daemon=daemon)
 
+        if result != '':
+            self.tgen.set_error(result)
+
         return result
 
     def stop(self):
@@ -712,10 +717,16 @@ class TopoRouter(TopoGear):
         "Get equipment information from 'show version'."
         output = self.vtysh_cmd('show version').split('\n')[0]
         columns = topotest.normalize_text(output).split(' ')
-        return {
-            'type': columns[0],
-            'version': columns[1],
-        }
+        try:
+            return {
+                'type': columns[0],
+                'version': columns[1],
+            }
+        except IndexError:
+            return {
+                'type': None,
+                'version': None,
+            }
 
     def has_version(self, cmpop, version):
         """
@@ -730,6 +741,9 @@ class TopoRouter(TopoGear):
         Usage example: router.has_version('>', '1.0')
         """
         rversion = self.version_info()['version']
+        if rversion is None:
+            return False
+
         result = topotest.version_cmp(rversion, version)
         if cmpop == '>=':
             return result >= 0
