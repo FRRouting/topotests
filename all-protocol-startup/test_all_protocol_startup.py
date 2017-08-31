@@ -178,12 +178,10 @@ def test_error_messages_vtysh():
         # Drop everything starting with "FRRouting X.xx" message
         vtystdout = re.sub(r"FRRouting [0-9]+.*", "", vtystdout, flags=re.DOTALL)
 
-        if (vtystdout != ''):
-            sys.stderr.write('\nr%s created some spurious VTYSH start StdOut messages:\n%s\n' % (i, vtystdout))
-        else:
+        if (vtystdout == ''):
             print("r%s StdOut ok" % i)
 
-        assert vtystdout == '', "Vtysh StdOut Output check failed for router r%s:\n%s" % (i, vtystdout)
+        assert vtystdout == '', "Vtysh StdOut Output check failed for router r%s" % i
 
         #
         # Second checking Standard Error
@@ -197,12 +195,10 @@ def test_error_messages_vtysh():
         # # Drop everything starting with "FRRouting X.xx" message
         # vtystderr = re.sub(r"FRRouting [0-9]+.*", "", vtystderr, flags=re.DOTALL) 
 
-        if (vtystderr != ''):
-            sys.stderr.write('\nr%s created some spurious VTYSH start StdErr messages:\n<%s>\n' % (i, vtystderr))
-        else:
+        if (vtystderr == ''):
             print("r%s StdErr ok" % i)
 
-        assert vtystderr == '', "Vtysh StdErr Output check failed for router r%s:\n%s" % (i, vtystderr)
+        assert vtystderr == '', "Vtysh StdErr Output check failed for router r%s" % i
 
     # Make sure that all daemons are running
     for i in range(1, 2):
@@ -876,22 +872,30 @@ def test_shutdown_check_stderr():
     net['r1'].stopRouter()
 
     log = net['r1'].getStdErr('ripd')
-    print("\nRIPd StdErr Log:\n" + log)
+    if log:
+        print("\nRIPd StdErr Log:\n" + log)
     log = net['r1'].getStdErr('ripngd')
-    print("\nRIPngd StdErr Log:\n" + log)
+    if log:
+        print("\nRIPngd StdErr Log:\n" + log)
     log = net['r1'].getStdErr('ospfd')
-    print("\nOSPFd StdErr Log:\n" + log)
+    if log:
+        print("\nOSPFd StdErr Log:\n" + log)
     log = net['r1'].getStdErr('ospf6d')
-    print("\nOSPF6d StdErr Log:\n" + log)
+    if log:
+        print("\nOSPF6d StdErr Log:\n" + log)
     log = net['r1'].getStdErr('isisd')
-    print("\nISISd StdErr Log:\n" + log)
+    if log:
+        print("\nISISd StdErr Log:\n" + log)
     log = net['r1'].getStdErr('bgpd')
-    print("\nBGPd StdErr Log:\n" + log)
+    if log:
+        print("\nBGPd StdErr Log:\n" + log)
     if (net['r1'].daemon_available('ldpd')):
         log = net['r1'].getStdErr('ldpd')
-        print("\nLDPd StdErr Log:\n" + log)
+        if log:
+            print("\nLDPd StdErr Log:\n" + log)
     log = net['r1'].getStdErr('zebra')
-    print("\nZebra StdErr Log:\n" + log)
+    if log:
+        print("\nZebra StdErr Log:\n" + log)
 
 
 def test_shutdown_check_memleak():
