@@ -22,6 +22,7 @@
 # OF THIS SOFTWARE.
 #
 
+import json
 import os
 import errno
 import re
@@ -51,14 +52,26 @@ class json_cmp_result(object):
 
     def add_error(self, error):
         "Append error message to the result"
-        self.errors.append(error)
+        for line in error.splitlines():
+            self.errors.append(line)
 
     def has_errors(self):
         "Returns True if there were errors, otherwise False."
         return len(self.errors) > 0
 
+def json_diff(d1, d2):
+    """
+    Returns a string with the difference between JSON data.
+    """
+    json_format_opts = {
+        'indent': 4,
+        'sort_keys': True,
+    }
+    dstr1 = json.dumps(d1, **json_format_opts)
+    dstr2 = json.dumps(d2, **json_format_opts)
+    return difflines(dstr2, dstr1, title1='Expected value', title2='Current value', n=0)
 
-def json_cmp(d1, d2, reason=False):
+def json_cmp(d1, d2):
     """
     JSON compare function. Receives two parameters:
     * `d1`: json value
@@ -109,8 +122,9 @@ def json_cmp(d1, d2, reason=False):
                 if len(nd2[key]) > len(nd1[key]):
                     result.add_error(
                         '{}["{}"] too few items '.format(parent, key) +
-                        '(have ({}) "{}", expected ({}) "{}")'.format(
-                            len(nd1[key]), str(nd1[key]), len(nd2[key]), str(nd2[key])))
+                        '(have {}, expected {}:\n {})'.format(
+                            len(nd1[key]), len(nd2[key]),
+                            json_diff(nd1[key], nd2[key])))
                     continue
 
                 # List all unmatched items errors
@@ -130,15 +144,15 @@ def json_cmp(d1, d2, reason=False):
                 # If there are unmatched items, error out.
                 if unmatched:
                     result.add_error(
-                        '{}["{}"] value is different (have "{}", expected "{}")'.format(
-                            parent, key, str(nd1[key]), str(nd2[key])))
+                        '{}["{}"] value is different (\n{})'.format(
+                            parent, key, json_diff(nd1[key], nd2[key])))
                 continue
 
             # Compare JSON values
             if nd1[key] != nd2[key]:
                 result.add_error(
-                    '{}["{}"] value is different (have "{}", expected "{}")'.format(
-                        parent, key, str(nd1[key]), str(nd2[key])))
+                    '{}["{}"] value is different (\n{})'.format(
+                        parent, key, json_diff(nd1[key], nd2[key])))
                 continue
 
     if result.has_errors():
@@ -198,20 +212,20 @@ def pid_exists(pid):
     else:
         return True
 
-def get_textdiff(text1, text2, title1="", title2=""):
+def get_textdiff(text1, text2, title1="", title2="", **opts):
     "Returns empty string if same or formatted diff"
 
     diff = '\n'.join(difflib.unified_diff(text1, text2,
-           fromfile=title1, tofile=title2))
+           fromfile=title1, tofile=title2, **opts))
     # Clean up line endings
     diff = os.linesep.join([s for s in diff.splitlines() if s])
     return diff
 
-def difflines(text1, text2, title1='', title2=''):
+def difflines(text1, text2, title1='', title2='', **opts):
     "Wrapper for get_textdiff to avoid string transformations."
     text1 = ('\n'.join(text1.rstrip().splitlines()) + '\n').splitlines(1)
     text2 = ('\n'.join(text2.rstrip().splitlines()) + '\n').splitlines(1)
-    return get_textdiff(text1, text2, title1, title2)
+    return get_textdiff(text1, text2, title1, title2, **opts)
 
 def get_file(content):
     """

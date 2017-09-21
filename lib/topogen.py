@@ -46,7 +46,6 @@ import glob
 import grp
 import platform
 import pwd
-import re
 import subprocess
 
 from mininet.net import Mininet
