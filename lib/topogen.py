@@ -40,6 +40,7 @@ Basic usage instructions:
 
 import os
 import sys
+import logging
 import json
 import ConfigParser
 import glob
@@ -882,6 +883,20 @@ def diagnose_env():
     is ok, otherwise `False`.
     """
     ret = True
+
+    # Test log path exists before installing handler.
+    if not os.path.isdir('/tmp'):
+        logger.warning('could not find /tmp for logs')
+    else:
+        os.system('mkdir /tmp/topotests')
+        # Log diagnostics to file so it can be examined later.
+        fhandler = logging.FileHandler(filename='/tmp/topotests/diagnostics.txt')
+        fhandler.setLevel(logging.DEBUG)
+        fhandler.setFormatter(
+            logging.Formatter(fmt='%(asctime)s %(levelname)s: %(message)s')
+        )
+        logger.addHandler(fhandler)
+
     logger.info('Running environment diagnostics')
 
     # Load configuration
@@ -945,6 +960,13 @@ def diagnose_env():
 
                 logger.warning('could not find {} in {}'.format(fname, frrdir))
                 ret = False
+            else:
+                if fname != 'zebra':
+                    continue
+
+                os.system(
+                    '{} -v 2>&1 >/tmp/topotests/frr_zebra.txt'.format(path)
+                )
 
     # Assert that Quagga utilities exist
     quaggadir = config.get('topogen', 'quaggadir')
@@ -977,9 +999,13 @@ def diagnose_env():
             if not os.path.isfile(path):
                 logger.warning('could not find {} in {}'.format(fname, quaggadir))
                 ret = False
+            else:
+                if fname != 'zebra':
+                    continue
 
-    if not os.path.isdir('/tmp'):
-        logger.warning('could not find /tmp for logs')
+                os.system(
+                    '{} -v 2>&1 >/tmp/topotests/quagga_zebra.txt'.format(path)
+                )
 
     # Test MPLS availability
     krel = platform.release()
@@ -1004,5 +1030,8 @@ def diagnose_env():
     # pylint: disable=W0702
     except:
         logger.warning('failed to find exabgp or returned error')
+
+    # After we logged the output to file, remove the handler.
+    logger.removeHandler(fhandler)
 
     return ret
