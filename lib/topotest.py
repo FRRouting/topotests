@@ -92,21 +92,22 @@ def json_cmp(d1, d2):
         s2_req = set([key for key in nd2 if nd2[key] is not None])
         diff = s2_req - s1
         if diff != set({}):
-            result.add_error('expected key(s) {} in {} (have {})'.format(
-                str(list(diff)), parent, str(list(s1))))
+            result.add_error('expected key(s) {} in {} (have {}):\n{}'.format(
+                str(list(diff)), parent, str(list(s1)), json_diff(nd1, nd2)))
 
         for key in s2.intersection(s1):
             # Test for non existence of key in d2
             if nd2[key] is None:
-                result.add_error('"{}" should not exist in {} (have {})'.format(
-                    key, parent, str(s1)))
+                result.add_error('"{}" should not exist in {} (have {}):\n{}'.format(
+                    key, parent, str(s1), json_diff(nd1[key], nd2[key])))
                 continue
             # If nd1 key is a dict, we have to recurse in it later.
             if isinstance(nd2[key], type({})):
                 if not isinstance(nd1[key], type({})):
                     result.add_error(
                         '{}["{}"] has different type than expected '.format(parent, key) +
-                        '(have {}, expected {})'.format(type(nd1[key]), type(nd2[key])))
+                        '(have {}, expected {}):\n{}'.format(
+                            type(nd1[key]), type(nd2[key]), json_diff(nd1[key], nd2[key])))
                     continue
                 nparent = '{}["{}"]'.format(parent, key)
                 squeue.append((nd1[key], nd2[key], nparent))
@@ -116,7 +117,8 @@ def json_cmp(d1, d2):
                 if not isinstance(nd1[key], type([])):
                     result.add_error(
                         '{}["{}"] has different type than expected '.format(parent, key) +
-                        '(have {}, expected {})'.format(type(nd1[key]), type(nd2[key])))
+                        '(have {}, expected {}):\n{}'.format(
+                            type(nd1[key]), type(nd2[key]), json_diff(nd1[key], nd2[key])))
                     continue
                 # Check list size
                 if len(nd2[key]) > len(nd1[key]):
@@ -541,7 +543,8 @@ class Router(Node):
                 if (daemonpid.isdigit() and pid_exists(int(daemonpid))):
                     self.cmd('kill -TERM %s' % daemonpid)
                     self.waitOutput()
-            sleep(2)
+            sleep(2, 'waiting for router "{}" daemons to finish'.format(
+                self.name))
             # 2nd round of kill if daemons didn't exist
             for d in StringIO.StringIO(rundaemons):
                 daemonpid = self.cmd('cat %s' % d.rstrip()).rstrip()
@@ -566,7 +569,7 @@ class Router(Node):
             self.cmd('chown %s:%s /etc/%s/%s.conf' % (self.routertype, self.routertype, self.routertype, daemon))
             self.waitOutput()
         else:
-            logger.warning('No daemon {} known'.format(daemon))
+            logger.info('No daemon {} known'.format(daemon))
         # print "Daemons after:", self.daemons
     def startRouter(self):
         # Disable integrated-vtysh-config
@@ -584,20 +587,20 @@ class Router(Node):
         if self.daemons['ldpd'] == 1:
             ldpd_path = os.path.join(self.daemondir, 'ldpd')
             if not os.path.isfile(ldpd_path):
-                logger.warning("LDP Test, but no ldpd compiled or installed")
+                logger.info("LDP Test, but no ldpd compiled or installed")
                 return "LDP Test, but no ldpd compiled or installed"
 
             if version_cmp(platform.release(), '4.5') < 0:
-                logger.warning("LDP Test need Linux Kernel 4.5 minimum")
+                logger.info("LDP Test need Linux Kernel 4.5 minimum")
                 return "LDP Test need Linux Kernel 4.5 minimum"
 
             # Check if required kernel modules are available with a dryrun modprobe
             # Silent accept of modprobe command assumes ok status
             if self.cmd('/sbin/modprobe -n mpls-router' ) != "":
-                logger.warning("LDP Test needs mpls-router kernel module")
+                logger.info("LDP Test needs mpls-router kernel module")
                 return "LDP Test needs mpls-router kernel module"
             if self.cmd('/sbin/modprobe -n mpls-iptunnel') != "":
-                logger.warning("LDP Test needs mpls-iptunnel kernel module")
+                logger.info("LDP Test needs mpls-iptunnel kernel module")
                 return "LDP Test needs mpls-router kernel module"
 
             self.cmd('/sbin/modprobe mpls-router')
@@ -607,7 +610,7 @@ class Router(Node):
         if self.daemons['eigrpd'] == 1:
             eigrpd_path = os.path.join(self.daemondir, 'eigrpd')
             if not os.path.isfile(eigrpd_path):
-                logger.warning("EIGRP Test, but no eigrpd compiled or installed")
+                logger.info("EIGRP Test, but no eigrpd compiled or installed")
                 return "EIGRP Test, but no eigrpd compiled or installed"
 
         # Init done - now restarting daemons
