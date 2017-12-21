@@ -537,25 +537,34 @@ class Router(Node):
     def stopRouter(self, wait=True):
         # Stop Running Quagga or FRR Daemons
         rundaemons = self.cmd('ls -1 /var/run/%s/*.pid' % self.routertype)
+        if re.search(r"No such file or directory", rundaemons):
+            return
         if rundaemons is not None:
             numRunning = 0
             for d in StringIO.StringIO(rundaemons):
                 daemonpid = self.cmd('cat %s' % d.rstrip()).rstrip()
                 if (daemonpid.isdigit() and pid_exists(int(daemonpid))):
-                    logger.info('killing %s %s' % (self.name, os.path.basename(d.rstrip().rsplit(".", 1)[0])))
+                    logger.info('{}: stopping {}'.format(
+                        self.name,
+                        os.path.basename(d.rstrip().rsplit(".", 1)[0])
+                    ))
                     self.cmd('kill -TERM %s' % daemonpid)
                     self.waitOutput()
                     if pid_exists(int(daemonpid)):
                         numRunning += 1
             if wait and numRunning > 0:
-                sleep(2)
+                sleep(2, '{}: waiting for daemons stopping'.format(self.name))
                 # 2nd round of kill if daemons didn't exit
                 for d in StringIO.StringIO(rundaemons):
                     daemonpid = self.cmd('cat %s' % d.rstrip()).rstrip()
                     if (daemonpid.isdigit() and pid_exists(int(daemonpid))):
-                        logger.info('killing (-7) %s %s' % (self.name, os.path.basename(d.rstrip().rsplit(".", 1)[0])))
+                        logger.info('{}: killing {}'.format(
+                            self.name,
+                            os.path.basename(d.rstrip().rsplit(".", 1)[0])
+                        ))
                         self.cmd('kill -7 %s' % daemonpid)
                         self.waitOutput()
+                    self.cmd('rm -- {}'.format(d.rstrip()))
     def removeIPs(self):
         for interface in self.intfNames():
             self.cmd('ip address flush', interface)
@@ -631,7 +640,7 @@ class Router(Node):
             ))
             self.waitOutput()
             logger.debug('{}: {} zebra started'.format(self, self.routertype))
-            time.sleep(1)
+            sleep(1, '{}: waiting for zebra to start'.format(self.name))
         # Fix Link-Local Addresses
         # Somehow (on Mininet only), Zebra removes the IPv6 Link-Local addresses on start. Fix this
         self.cmd('for i in `ls /sys/class/net/` ; do mac=`cat /sys/class/net/$i/address`; IFS=\':\'; set $mac; unset IFS; ip address add dev $i scope link fe80::$(printf %02x $((0x$1 ^ 2)))$2:${3}ff:fe$4:$5$6/64; done')
