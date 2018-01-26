@@ -22,7 +22,7 @@
 #
 
 """
-test_mpls_vpn_topo1.py: Simple FRR/Quagga MPLS VPN Test
+customize.py: Simple FRR/Quagga MPLS L3VPN test topology
 
                   |
              +----+----+
@@ -77,19 +77,19 @@ import os
 import sys
 import pytest
 
-# Save the Current Working Directory to find configuration files.
-CWD = os.path.dirname(os.path.realpath(__file__))
-sys.path.append(os.path.join(CWD, '../'))
-
 # pylint: disable=C0413
 # Import topogen and topotest helpers
 from lib import topotest
 from lib.topogen import Topogen, TopoRouter, get_topogen
 from lib.topolog import logger
-from lib.lutil import luStart, luInclude, luFinish, luNumFail, luShowFail
 
 # Required to instantiate the topology builder class.
 from mininet.topo import Topo
+
+import shutil
+CWD = os.path.dirname(os.path.realpath(__file__))
+# test name based on directory
+TEST = os.path.basename(CWD)
 
 class ThisTestTopo(Topo):
     "Test topology builder"
@@ -128,103 +128,50 @@ class ThisTestTopo(Topo):
         switch[1].add_link(tgen.gears['r2'], nodeif='r2-eth2')
         switch[1].add_link(tgen.gears['r3'], nodeif='r3-eth1')
 
-def setup_module(mod):
-    "Sets up the pytest environment"
-    # This function initiates the topology build with Topogen...
-    tgen = Topogen(ThisTestTopo, mod.__name__)
-    # ... and here it calls Mininet initialization functions.
-    tgen.start_topology()
+def doCmd(tgen, rtr, cmd):
+    output = tgen.net[rtr].cmd(cmd).strip()
+    if len(output):
+        logger.info('command output: ' + output)
 
-    print("Topology started")
-    # This is a sample of configuration loading.
-    router_list = tgen.routers()
+def ltemplatePreRouterStartHook():
+    tgen = get_topogen()
+    logger.info('pre router-start hook')
+    #configure r2 mpls interfaces
+    intfs = ['lo', 'r2-eth0', 'r2-eth1', 'r2-eth2']
+    for intf in intfs:
+        doCmd(tgen, 'r2', 'echo 1 > /proc/sys/net/mpls/conf/{}/input'.format(intf))
+    #configure MPLS
+    rtrs = ['r1', 'r3', 'r4']
+    cmds = ['echo 1 > /proc/sys/net/mpls/conf/lo/input']
+    for rtr in rtrs:
+        for cmd in cmds:
+            doCmd(tgen, rtr, cmd)
+        intfs = ['lo', rtr+'-eth0', rtr+'-eth4']
+        for intf in intfs:
+            doCmd(tgen, rtr, 'echo 1 > /proc/sys/net/mpls/conf/{}/input'.format(intf))
+    logger.info('setup mpls input')
+    return;
 
-    # For all registred routers, load the zebra configuration file
-    for rname, router in router_list.iteritems():
-        print("Setting up %s" % rname)
-        config = os.path.join(CWD, '{}/zebra.conf'.format(rname))
-        if os.path.exists(config):
-            router.load_config(TopoRouter.RD_ZEBRA, config)
-        config = os.path.join(CWD, '{}/ospfd.conf'.format(rname))
-        if os.path.exists(config):
-            router.load_config(TopoRouter.RD_OSPF, config)
-        config = os.path.join(CWD, '{}/ldpd.conf'.format(rname))
-        if os.path.exists(config):
-            router.load_config(TopoRouter.RD_LDP, config)
-        config = os.path.join(CWD, '{}/bgpd.conf'.format(rname))
-        if os.path.exists(config):
-            router.load_config(TopoRouter.RD_BGP, config)
+def ltemplatePostRouterStartHook():
+    logger.info('post router-start hook')
+    return;
 
-    # After loading the configurations, this function loads configured daemons.
-    print("Starting routers")
-    tgen.start_router()
-
-    # For debugging after starting daemons, uncomment the next line
-    #tgen.mininet_cli()
-
-
-def teardown_module(mod):
-    "Teardown the pytest environment"
+def versionCheck(vstr, rname='r1', compstr='<',cli=False):
     tgen = get_topogen()
 
-    # This function tears down the whole topology.
-    tgen.stop_topology()
-
-def test_run_lu_tests():
-    tgen = get_topogen()
-
-    # Don't run this test if we have any failure.
-    if tgen.routers_have_failure():
-        pytest.skip(tgen.errors)
-
-    router = tgen.gears['r1']
-    is_pre31 = False
+    router = tgen.gears[rname]
+    ret = True
     try:
-        if router.has_version('<', '3.1'):
-            is_pre31 = True
-            print("\nversion check failed, version < 3.1")
+        if router.has_version(compstr, vstr):
+            ret = False
+            logger.debug('version check failed, version {} {}'.format(compstr, vstr))
     except:
-        is_pre31 = False
-
-    if is_pre31 == True:
-        print("\n\n** Skipping main tests on old version (<3.1)")
-    else:
-        print("\n\n** Running main test cases")
-        print("******************************\n")
-
-        luStart(os.path.dirname(os.path.realpath(__file__)),
-                router.logdir, tgen.net)
-
-        CliOnFail = False
-        # For debugging, uncomment the next line
-        #CliOnFail = tgen.mininet_cli
-
-        luInclude('teststart.py', CliOnFail)
-        # For debugging, uncomment the next line
-        #tgen.mininet_cli()
-
-        luInclude('testfinish.py', CliOnFail)
-        print(luFinish())
-
-        # For debugging after starting FRR/Quagga daemons, uncomment the next line
-        #tgen.mininet_cli()
-
-        # Make sure that all daemons are running
-        numFail = luNumFail()
-        if numFail > 0:
-            luShowFail()
-            fatal_error = '%d tests failed' % numFail
-            assert fatal_error == 'See summary output above', fatal_error
-
-# Memory leak test template
-def test_memory_leak():
-    "Run the memory leak test and report results."
-    tgen = get_topogen()
-    if not tgen.is_memleak_enabled():
-        pytest.skip('Memory leak test/report is disabled')
-
-    tgen.report_memory_leaks()
-
-if __name__ == '__main__':
-    args = ["-s"] + sys.argv[1:]
-    sys.exit(pytest.main(args))
+        ret = True
+    if ret == False:
+        ret = 'Skipping main tests on old version ({}{})'.format(compstr, vstr)
+        logger.info(ret)
+    if cli:
+        logger.info('calling mininet CLI')
+        tgen.mininet_cli()
+        logger.info('exited mininet CLI')
+    return ret
