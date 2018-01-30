@@ -48,6 +48,7 @@ import grp
 import platform
 import pwd
 import subprocess
+import pytest
 
 from mininet.net import Mininet
 from mininet.log import setLogLevel
@@ -385,7 +386,7 @@ class Topogen(object):
 
         if errors != '':
             self.set_error(errors, 'router_error')
-            assert errors != '', errors
+            assert False, errors
             return True
         return False
 
