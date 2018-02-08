@@ -60,16 +60,16 @@ customize.py: Simple FRR/Quagga MPLS L3VPN test topology
           \    /                \
 r3-eth1 .3 |  | .3  r3-eth0      | .4 r4-eth0
       +----+--+---+         +----+----+
-      |     r3    |         |    r4   |
-      |  3.3.3.3  |         | 4.4.4.4 |               PE Routers
-      +-----------+         +---------+
- 192.168.1. | .1     192.168.1.  | .1    rX-eth4
-            | .2                 | .2    ceX-eth0
-      +-----+-----+         +----+-----+
-      |    ce2    |         |   ce3    |
-      | 99.0.0.2  |         | 99.0.0.3 |              CE Routers
-      +-----+-----+         +----+-----+
-            |                    |
+      |     r3    |         |    r4   | r4-eth5
+      |  3.3.3.3  |         | 4.4.4.4 |-------+       PE Routers
+      +-----------+         +---------+       |
+192.168.1.1 |r3.eth4 192.168.1.1 | r4-eth4    |192.168.2.1
+         .2 |       ceX-eth0  .2 |            |         .2
+      +-----+-----+         +----+-----+ +----+-----+
+      |    ce2    |         |   ce3    | |   ce4    |
+      | 99.0.0.2  |         | 99.0.0.3 | | 99.0.0.4 | CE Routers
+      +-----+-----+         +----+-----+ +----+-----+
+            |                    |            |
 
 """
 
@@ -77,6 +77,7 @@ import os
 import re
 import sys
 import pytest
+import platform
 
 # pylint: disable=C0413
 # Import topogen and topotest helpers
@@ -92,6 +93,8 @@ CWD = os.path.dirname(os.path.realpath(__file__))
 # test name based on directory
 TEST = os.path.basename(CWD)
 
+InitSuccess = False
+
 class ThisTestTopo(Topo):
     "Test topology builder"
     def build(self, *_args, **_opts):
@@ -102,21 +105,22 @@ class ThisTestTopo(Topo):
         # between routers, switches and hosts.
         #
         # Create P/PE routers
-        tgen.add_router('r1')
         #check for mpls
+        tgen.add_router('r1')
         if tgen.hasmpls != True:
             logger.info('MPLS not available, tests will be skipped')
             return
         for routern in range(2, 5):
             tgen.add_router('r{}'.format(routern))
         # Create CE routers
-        for routern in range(1, 4):
+        for routern in range(1, 5):
             tgen.add_router('ce{}'.format(routern))
 
         #CE/PE links
         tgen.add_link(tgen.gears['ce1'], tgen.gears['r1'], 'ce1-eth0', 'r1-eth4')
         tgen.add_link(tgen.gears['ce2'], tgen.gears['r3'], 'ce2-eth0', 'r3-eth4')
         tgen.add_link(tgen.gears['ce3'], tgen.gears['r4'], 'ce3-eth0', 'r4-eth4')
+        tgen.add_link(tgen.gears['ce4'], tgen.gears['r4'], 'ce4-eth0', 'r4-eth5')
 
         # Create a switch with just one router connected to it to simulate a
         # empty network.
@@ -134,49 +138,118 @@ class ThisTestTopo(Topo):
         switch[1].add_link(tgen.gears['r2'], nodeif='r2-eth2')
         switch[1].add_link(tgen.gears['r3'], nodeif='r3-eth1')
 
-def doCmd(tgen, rtr, cmd, checkstr = None):
-    output = tgen.net[rtr].cmd(cmd).strip()
-    if len(output):
-        if checkstr != None:
-            return re.search(checkstr, output)
-        logger.info('command output: ' + output)
-    return None
+class CustCmd():
+    def __init__(self):
+        self.resetCounts()
+
+    def doCmd(self, tgen, rtr, cmd, checkstr = None):
+        output = tgen.net[rtr].cmd(cmd).strip()
+        if len(output):
+            self.output += 1
+            if checkstr != None:
+                ret = re.search(checkstr, output)
+                if ret == None:
+                    self.nomatch += 1
+                else:
+                    self.match += 1
+                return ret
+            logger.info('command: {} {}'.format(rtr, cmd))
+            logger.info('output: ' + output)
+        self.none += 1
+        return None
+
+    def resetCounts(self):
+        self.match = 0
+        self.nomatch = 0
+        self.output = 0
+        self.none = 0
+
+    def getMatch(self):
+        return self.match
+
+    def getNoMatch(self):
+        return self.nomatch
+
+    def getOutput(self):
+        return self.output
+
+    def getNone(self):
+        return self.none
+
+cc = CustCmd()
 
 def ltemplatePreRouterStartHook():
+    krel = platform.release()
     tgen = get_topogen()
-    logger.info('pre router-start hook')
+    logger.info('pre router-start hook, kernel=' + krel)
     #check for mpls
     if tgen.hasmpls != True:
         logger.info('MPLS not available, skipping setup')
         return
+    #collect/log info on iproute2
+    cc.doCmd(tgen, 'r2', 'apt-cache policy iproute2')
+    cc.doCmd(tgen, 'r2', 'yum info iproute2')
+    cc.doCmd(tgen, 'r2', 'yum info iproute')
+
+    cc.resetCounts()
     #configure r2 mpls interfaces
     intfs = ['lo', 'r2-eth0', 'r2-eth1', 'r2-eth2']
     for intf in intfs:
-        doCmd(tgen, 'r2', 'echo 1 > /proc/sys/net/mpls/conf/{}/input'.format(intf))
-    #configure MPLS
+        cc.doCmd(tgen, 'r2', 'echo 1 > /proc/sys/net/mpls/conf/{}/input'.format(intf))
+
+    #configure cust1 VRFs & MPLS
     rtrs = ['r1', 'r3', 'r4']
-    cmds = ['echo 1 > /proc/sys/net/mpls/conf/lo/input']
+    cmds = ['ip link add cust1 type vrf table 10',
+            'ip ru add oif cust1 table 10',
+            'ip ru add iif cust1 table 10',
+            'ip link set dev cust1 up']
     for rtr in rtrs:
         router = tgen.gears[rtr]
         for cmd in cmds:
-            doCmd(tgen, rtr, cmd)
-        intfs = ['lo', rtr+'-eth0', rtr+'-eth4']
+            cc.doCmd(tgen, rtr, cmd)
+        cc.doCmd(tgen, rtr, 'ip link set dev {}-eth4 master cust1'.format(rtr))
+        intfs = ['cust1', 'lo', rtr+'-eth0', rtr+'-eth4']
         for intf in intfs:
-            doCmd(tgen, rtr, 'echo 1 > /proc/sys/net/mpls/conf/{}/input'.format(intf))
-    logger.info('setup mpls input')
+            cc.doCmd(tgen, rtr, 'echo 1 > /proc/sys/net/mpls/conf/{}/input'.format(intf))
+        logger.info('setup {0} vrf cust1, {0}-eth4. enabled mpls input.'.format(rtr))
+    #configure cust2 VRFs & MPLS
+    rtrs = ['r4']
+    cmds = ['ip link add cust2 type vrf table 20',
+            'ip ru add oif cust1 table 20',
+            'ip ru add iif cust1 table 20',
+            'ip link set dev cust2 up']
+    for rtr in rtrs:
+        for cmd in cmds:
+            cc.doCmd(tgen, rtr, cmd)
+        cc.doCmd(tgen, rtr, 'ip link set dev {}-eth5 master cust2'.format(rtr))
+        intfs = ['cust2', rtr+'-eth5']
+        for intf in intfs:
+            cc.doCmd(tgen, rtr, 'echo 1 > /proc/sys/net/mpls/conf/{}/input'.format(intf))
+        logger.info('setup {0} vrf cust2, {0}-eth5. enabled mpls input.'.format(rtr))
+    global InitSuccess
+    if cc.getOutput():
+        InitSuccess = False
+        logger.info('VRF config failed ({}), tests will be skipped'.format(cc.getOutput()))
+    else:
+        InitSuccess = True
+        logger.info('VRF config successful!')
     return;
 
 def ltemplatePostRouterStartHook():
     logger.info('post router-start hook')
     return;
 
-def versionCheck(vstr, rname='r1', compstr='<',cli=False):
+def versionCheck(vstr, rname='r1', compstr='<',cli=False, kernel='4.9'):
     tgen = get_topogen()
 
     router = tgen.gears[rname]
 
     if tgen.hasmpls != True:
         ret = 'MPLS not initialized'
+        return ret
+
+    if InitSuccess != True:
+        ret = 'Test not successfully initialized'
         return ret
 
     ret = True
@@ -187,8 +260,13 @@ def versionCheck(vstr, rname='r1', compstr='<',cli=False):
     except:
         ret = True
     if ret == False:
-        ret = 'Skipping main tests on old version ({}{})'.format(compstr, vstr)
+        ret = 'Skipping tests on old version ({}{})'.format(compstr, vstr)
         logger.info(ret)
+    elif kernel != None:
+        krel = platform.release()
+        if topotest.version_cmp(krel, kernel) < 0:
+            ret = 'Skipping tests on old version ({} < {})'.format(krel, kernel)
+            logger.info(ret)
     if cli:
         logger.info('calling mininet CLI')
         tgen.mininet_cli()

@@ -43,6 +43,7 @@ class lUtil:
     l_pass = 0
     l_fail = 0
     l_filename = ''
+    l_last = None
     l_line = 0
 
     fout = ''
@@ -57,6 +58,17 @@ class lUtil:
         if self.l_level > 5:
             print(str)
 
+    def summary(self, str):
+        if self.fsum == '':
+            self.fsum = open(self.fsum_name, 'w', 0)
+            self.fsum.write('\
+******************************************************************************\n')
+            self.fsum.write('\
+Test Target Summary                                                  Pass Fail\n')
+            self.fsum.write('\
+******************************************************************************\n')
+        self.fsum.write(str+'\n')
+
     def result(self, target, success, str):
         if success:
             p = 1
@@ -68,15 +80,7 @@ class lUtil:
             self.l_fail += 1
         res = "%-4d %-6s %-56s %-4d %d" % (self.l_total, target, str, p, f)
         self.log ('R:'+res)
-        if self.fsum == '':
-            self.fsum = open(self.fsum_name, 'w', 0)
-            self.fsum.write('\
-******************************************************************************\n')
-            self.fsum.write('\
-Test Target Summary                                                  Pass Fail\n')
-            self.fsum.write('\
-******************************************************************************\n')
-        self.fsum.write(res+'\n')
+        self.summary(res)
         if f == 1 and self.CallOnFail != False:
             self.CallOnFail()
 
@@ -100,7 +104,9 @@ Total %-4d                                                           %-4d %d\n\
         return ret
 
     def setFilename(self, name):
-        self.log('FILE: ' + name)
+        str = 'FILE: ' + name
+        self.log(str)
+        self.summary(str)
         self.l_filename = name
         self.line = 0
 
@@ -221,12 +227,15 @@ Total %-4d                                                           %-4d %d\n\
         found = self.command(target, command, regexp, 'pass', '%s +%4.2f secs' % (result, delta))
         return found
 
-#init class
-LUtil=lUtil()
+#initialized by luStart
+LUtil=None
 
 #entry calls
 def luStart(baseScriptDir='.', baseLogDir='.', net='',
             fout='output.log', fsum='summary.txt', level=9):
+    global LUtil
+    #init class
+    LUtil=lUtil()
     LUtil.base_script_dir = baseScriptDir
     LUtil.base_log_dir = baseLogDir
     LUtil.net = net
@@ -242,23 +251,32 @@ def luCommand(target, command, regexp='.', op='none', result='', time=10):
     else:
         return LUtil.wait(target, command, regexp, op, result, time)
 
+def luLast():
+    if LUtil.l_last != None:
+        LUtil.log('luLast:%s:' %  LUtil.l_last.group())
+    return LUtil.l_last
 
 def luInclude(filename, CallOnFail=None):
-    global LUtil
     tstFile = LUtil.base_script_dir + '/' + filename
     LUtil.setFilename(filename)
     if CallOnFail != None:
         oldCallOnFail = LUtil.getCallOnFail()
         LUtil.setCallOnFail(CallOnFail)
     if filename.endswith('.py'):
+        LUtil.log("luInclude: execfile "+tstFile)
         execfile(tstFile)
     else:
+        LUtil.log("luInclude: execTestFile "+tstFile)
         LUtil.execTestFile(tstFile)
     if CallOnFail != None:
         LUtil.setCallOnFail(oldCallOnFail)
 
 def luFinish():
-    return LUtil.closeFiles()
+    global LUtil
+    ret = LUtil.closeFiles()
+    #done
+    LUtil = None
+    return ret;
 
 def luNumFail():
     return LUtil.l_fail
