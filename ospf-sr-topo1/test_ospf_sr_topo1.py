@@ -141,7 +141,7 @@ def test_ospf_sr():
         router = 'r{}'.format(rnum)
 
         # Check that Segment Routing is available
-        output = tgen.gears[router].vtysh_cmd("show ip ospf database segment-routing")
+        output = tgen.gears[router].vtysh_cmd("show ip ospf database segment-routing json")
         if output.find("Unknown") != -1:
             pytest.skip('Segment Routing is not available')
 
@@ -168,7 +168,7 @@ def test_ospf_kernel_route():
         router = 'r{}'.format(rnum)
 
         # Check that Segment Routing is available
-        output = tgen.gears[router].vtysh_cmd("show ip ospf database segment-routing")
+        output = tgen.gears[router].vtysh_cmd("show ip ospf database segment-routing json")
         if output.find("Unknown") != -1:
             pytest.skip('Segment Routing is not available')
 
