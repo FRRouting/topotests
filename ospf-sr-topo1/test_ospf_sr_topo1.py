@@ -23,41 +23,37 @@
 #
 
 """
-test_ospf_sr_topo1.py: Test the FRR/Quagga OSPF routing daemon
-with Segment Routing.
+test_ospf_sr_topo1.py: Test the FRR OSPF routing daemon with Segment Routing.
 """
 
 import os
-import re
 import sys
 from functools import partial
-import pytest
 
 # Save the Current Working Directory to find configuration files.
 CWD = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(CWD, '../'))
 
 # pylint: disable=C0413
+# Required to instantiate the topology builder class.
+from mininet.topo import Topo
 # Import topogen and topotest helpers
 from lib import topotest
 from lib.topogen import Topogen, TopoRouter, get_topogen
 from lib.topolog import logger
+# and Finally pytest
+import pytest
 
-# Required to instantiate the topology builder class.
-from mininet.topo import Topo
-
-import shutil
 
 class OspfSrTopo(Topo):
     "Test topology builder"
-    def build(self, *_args, **_opts):
+    def build(self):
         "Build function"
         tgen = get_topogen(self)
 
         # Check for mpls
-        if tgen.hasmpls != True:
-            logger.info('MPLS not available, tests will be skipped')
-            return
+        if tgen.hasmpls is not True:
+            tgen.set_error('MPLS not available, tests will be skipped')
 
         # Create 4 routers
         for routern in range(1, 5):
@@ -78,8 +74,13 @@ class OspfSrTopo(Topo):
         switch.add_link(tgen.gears['r4'])
         switch.add_link(tgen.gears['r2'])
 
+
 def setup_module(mod):
     "Sets up the pytest environment"
+
+    print "\n\n** %s: Setup Topology" % mod.__name__
+    print "*************************************\n"
+
     tgen = Topogen(OspfSrTopo, mod.__name__)
     tgen.start_topology()
 
@@ -98,15 +99,28 @@ def setup_module(mod):
     # Initialize all routers.
     tgen.start_router()
 
-    # Check version
+    # Verify that version, MPLS and Segment Routing are OK
     for router in router_list.values():
+        # Check for Version
         if router.has_version('<', '4'):
-            tgen.set_error('unsupported version')
+            tgen.set_error('Unsupported FRR version')
+            break
+        # Check that Segment Routing is available
+        output = tgen.gears[router.name].vtysh_cmd(
+            "show ip ospf database segment-routing json")
+        if output.find("Unknown") != -1:
+            tgen.set_error('Segment Routing is not available')
+
 
 def teardown_module(mod):
     "Teardown the pytest environment"
+
+    print "\n\n** %s: Shutdown Topology" % mod.__name__
+    print "******************************************\n"
+
     tgen = get_topogen()
     tgen.stop_topology()
+
 
 # Shared test function to validate expected output.
 def compare_ospf_srdb(rname, expected):
@@ -115,10 +129,12 @@ def compare_ospf_srdb(rname, expected):
     and compare the obtained result with the expected output.
     """
     tgen = get_topogen()
-    current = tgen.gears[rname].vtysh_cmd('show ip ospf database segment-routing json')
+    current = tgen.gears[rname].vtysh_cmd(
+        'show ip ospf database segment-routing json')
     return topotest.difflines(current, expected,
                               title1="Current output",
                               title2="Expected output")
+
 
 def compare_mpls_table(rname, expected):
     """
@@ -131,19 +147,18 @@ def compare_mpls_table(rname, expected):
                               title1="Current output",
                               title2="Expected output")
 
+
 def test_ospf_sr():
     "Test OSPF daemon Segment Routing"
     tgen = get_topogen()
     if tgen.routers_have_failure():
         pytest.skip(tgen.errors)
 
+    print "\n\n** Test OSPF SRDB"
+    print "*******************\n"
+
     for rnum in range(1, 5):
         router = 'r{}'.format(rnum)
-
-        # Check that Segment Routing is available
-        output = tgen.gears[router].vtysh_cmd("show ip ospf database segment-routing json")
-        if output.find("Unknown") != -1:
-            pytest.skip('Segment Routing is not available')
 
         logger.info('Checking OSPF Segment Routing database on router "%s"',
                     router)
@@ -156,7 +171,10 @@ def test_ospf_sr():
         test_func = partial(compare_ospf_srdb, router, expected)
         result, diff = topotest.run_and_expect(test_func, '',
                                                count=25, wait=3)
-        assert result, 'OSPF did not start Segment Routing on {}:\n{}'.format(router, diff)
+        assert result, (
+            'OSPF did not start Segment Routing on {}:\n{}'
+            ).format(router, diff)
+
 
 def test_ospf_kernel_route():
     "Test OSPF Segment Routing MPLS route installation"
@@ -164,13 +182,11 @@ def test_ospf_kernel_route():
     if tgen.routers_have_failure():
         pytest.skip(tgen.errors)
 
+    print "\n\n** Test MPLS Tables"
+    print "*********************\n"
+
     for rnum in range(1, 5):
         router = 'r{}'.format(rnum)
-
-        # Check that Segment Routing is available
-        output = tgen.gears[router].vtysh_cmd("show ip ospf database segment-routing json")
-        if output.find("Unknown") != -1:
-            pytest.skip('Segment Routing is not available')
 
         logger.info('Checking OSPF SR MPLS table in "%s"', router)
 
@@ -182,7 +198,10 @@ def test_ospf_kernel_route():
         test_func = partial(compare_mpls_table, router, expected)
         result, diff = topotest.run_and_expect(test_func, '',
                                                count=25, wait=3)
-        assert result, 'OSPF did not properly instal MPLS table on {}:\n{}'.format(router, diff)
+        assert result, (
+            'OSPF did not properly instal MPLS table on {}:\n{}'
+            ).format(router, diff)
+
 
 def test_memory_leak():
     "Run the memory leak test and report results."
