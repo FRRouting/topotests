@@ -78,8 +78,7 @@ class OspfSrTopo(Topo):
 def setup_module(mod):
     "Sets up the pytest environment"
 
-    print "\n\n** %s: Setup Topology" % mod.__name__
-    print "*************************************\n"
+    logger.info('\n\n---- Starting OSPF Segment Routing tests ----\n')
 
     tgen = Topogen(OspfSrTopo, mod.__name__)
     tgen.start_topology()
@@ -115,12 +114,10 @@ def setup_module(mod):
 def teardown_module(mod):
     "Teardown the pytest environment"
 
-    print "\n\n** %s: Shutdown Topology" % mod.__name__
-    print "******************************************\n"
-
     tgen = get_topogen()
     tgen.stop_topology()
 
+    logger.info('\n\n---- OSPF Segment Routing tests End ----\n')
 
 # Shared test function to validate expected output.
 def compare_ospf_srdb(rname, expected):
@@ -154,14 +151,12 @@ def test_ospf_sr():
     if tgen.routers_have_failure():
         pytest.skip(tgen.errors)
 
-    print "\n\n** Test OSPF SRDB"
-    print "*******************\n"
+    logger.info('--- test OSPF Segment Routing Data Base ---')
 
     for rnum in range(1, 5):
         router = 'r{}'.format(rnum)
 
-        logger.info('Checking OSPF Segment Routing database on router "%s"',
-                    router)
+        logger.info('\tRouter "%s"', router)
 
         # Load expected results from the command
         reffile = os.path.join(CWD, '{}/ospf_srdb.json'.format(router))
@@ -182,13 +177,12 @@ def test_ospf_kernel_route():
     if tgen.routers_have_failure():
         pytest.skip(tgen.errors)
 
-    print "\n\n** Test MPLS Tables"
-    print "*********************\n"
+    logger.info('--- test OSPF Segment Routing MPLS tables ---')
 
     for rnum in range(1, 5):
         router = 'r{}'.format(rnum)
 
-        logger.info('Checking OSPF SR MPLS table in "%s"', router)
+        logger.info('\tRouter "%s"', router)
 
         # Load expected results from the command
         reffile = os.path.join(CWD, '{}/zebra_mpls.json'.format(router))
