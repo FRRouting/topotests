@@ -318,6 +318,9 @@ def luNumFail():
 def luNumPass():
     return LUtil.l_pass
 
+def luResult(target, success, str):
+    return LUtil.result(target, success, str)
+
 def luShowFail():
     printed = 0
     sf = open(LUtil.fsum_name, 'r')

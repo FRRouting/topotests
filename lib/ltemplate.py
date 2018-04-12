@@ -93,6 +93,9 @@ class LTemplate():
             config = os.path.join(self.testdir, '{}/bgpd.conf'.format(rname))
             if os.path.exists(config):
                 router.load_config(TopoRouter.RD_BGP, config)
+            config = os.path.join(self.testdir, '{}/isisd.conf'.format(rname))
+            if os.path.exists(config):
+                router.load_config(TopoRouter.RD_ISIS, config)
 
         # After loading the configurations, this function loads configured daemons.
         logger.info('Starting routers')
@@ -141,7 +144,7 @@ def teardown_module(mod):
     tgen.stop_topology()
     _lt = None
 
-def ltemplateTest(script, SkipIfFailed=True, CallOnFail=None, CheckFuncStr=None):
+def ltemplateTest(script, SkipIfFailed=True, CallOnFail=None, CheckFuncStr=None, KeepGoing=False):
     tgen = get_topogen()
     if not os.path.isfile(script):
         if not os.path.isfile(os.path.join(_lt.scriptdir, script)):
@@ -153,7 +156,8 @@ def ltemplateTest(script, SkipIfFailed=True, CallOnFail=None, CheckFuncStr=None)
     if SkipIfFailed and tgen.routers_have_failure():
         pytest.skip(tgen.errors)
     if numEntry > 0:
-        pytest.skip("Have %d errors" % numEntry)
+	if not KeepGoing:
+	    pytest.skip("Have %d errors" % numEntry)
 
     if CheckFuncStr != None:
         check = eval(CheckFuncStr)
@@ -167,7 +171,8 @@ def ltemplateTest(script, SkipIfFailed=True, CallOnFail=None, CheckFuncStr=None)
     if numFail > 0:
         luShowFail()
         fatal_error = "%d tests failed" % numFail
-        assert "scripts/cleanup_all.py failed" == "See summary output above", fatal_error
+	if not KeepGoing:
+	    assert "scripts/cleanup_all.py failed" == "See summary output above", fatal_error
 
 # Memory leak test template
 def test_memory_leak():
@@ -251,7 +256,7 @@ def ltemplateVersionCheck(vstr, rname='r1', compstr='<',cli=False, kernel='4.9',
         if _lt.iproute2Ver == None:
             #collect/log info on iproute2
             cc = ltemplateRtrCmd()
-            found = cc.doCmd(tgen, 'r2', 'apt-cache policy iproute2', 'Installed: ([\d\.]*)')
+            found = cc.doCmd(tgen, rname, 'apt-cache policy iproute2', 'Installed: ([\d\.]*)')
             if found != None:
                 iproute2Ver = found.group(1)
             else:
