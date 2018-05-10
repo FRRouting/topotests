@@ -470,6 +470,7 @@ class Router(Node):
                         'ospf6d': 0, 'isisd': 0, 'bgpd': 0, 'pimd': 0,
                         'ldpd': 0, 'eigrpd': 0, 'nhrpd': 0}
         self.daemons_options = {'zebra': ''}
+        self.reportCores = True
 
     def _config_frr(self, **params):
         "Configure FRR binaries"
@@ -518,8 +519,11 @@ class Router(Node):
         assert_sysctl(self, 'net.ipv6.conf.all.forwarding', 1)
         # Enable coredumps
         assert_sysctl(self, 'kernel.core_uses_pid', 1)
-        assert_sysctl(self, 'fs.suid_dumpable', 2)
-        corefile = '{}/{}_%e_core-sig_%s-pid_%p.dmp'.format(self.logdir, self.name)
+        assert_sysctl(self, 'fs.suid_dumpable', 1)
+        #this applies to the kernel not the namespace...
+        #original on ubuntu 17.x, but apport won't save as in namespace
+        # |/usr/share/apport/apport %p %s %c %d %P
+        corefile = '%e_core-sig_%s-pid_%p.dmp'
         assert_sysctl(self, 'kernel.core_pattern', corefile)
         self.cmd('ulimit -c unlimited')
         # Set ownership of config files
@@ -567,6 +571,9 @@ class Router(Node):
                         self.cmd('kill -7 %s' % daemonpid)
                         self.waitOutput()
                     self.cmd('rm -- {}'.format(d.rstrip()))
+        if wait:
+                self.checkRouterCores(reportOnce=True)
+
     def removeIPs(self):
         for interface in self.intfNames():
             self.cmd('ip address flush', interface)
@@ -600,15 +607,16 @@ class Router(Node):
         else:
             logger.info('No daemon {} known'.format(daemon))
         # print "Daemons after:", self.daemons
+
     def startRouter(self, tgen=None):
         # Disable integrated-vtysh-config
         self.cmd('echo "no service integrated-vtysh-config" >> /etc/%s/vtysh.conf' % self.routertype)
         self.cmd('chown %s:%svty /etc/%s/vtysh.conf' % (self.routertype, self.routertype, self.routertype))
         # TODO remove the following lines after all tests are migrated to Topogen.
         # Try to find relevant old logfiles in /tmp and delete them
-        map(os.remove, glob.glob("/tmp/*%s*.log" % self.name))
+        map(os.remove, glob.glob('{}/{}/*.log'.format(self.logdir, self.name)))
         # Remove old core files
-        map(os.remove, glob.glob("/tmp/%s*.dmp" % self.name))
+        map(os.remove, glob.glob('{}/{}/*.dmp'.format(self.logdir, self.name)))
         # Remove IP addresses from OS first - we have them in zebra.conf
         self.removeIPs()
         # If ldp is used, check for LDP to be compiled and Linux Kernel to be 4.5 or higher
@@ -648,13 +656,18 @@ class Router(Node):
 
         self.restartRouter()
         return ""
+
     def restartRouter(self):
-        # Starts actuall daemons without init (ie restart)
+        # Starts actual daemons without init (ie restart)
+        # cd to per node directory
+        self.cmd('cd {}/{}'.format(self.logdir, self.name))
+        #Re-enable to allow for report per run
+        self.reportCores = True
         # Start Zebra first
         if self.daemons['zebra'] == 1:
             zebra_path = os.path.join(self.daemondir, 'zebra')
             zebra_option = self.daemons_options['zebra']
-            self.cmd('{0} {1} > {2}/{3}-zebra.out 2> {2}/{3}-zebra.err &'.format(
+            self.cmd('{0} {1} > zebra.out 2> zebra.err &'.format(
                  zebra_path, zebra_option, self.logdir, self.name
             ))
             self.waitOutput()
@@ -670,7 +683,7 @@ class Router(Node):
                 continue
 
             daemon_path = os.path.join(self.daemondir, daemon)
-            self.cmd('{0} > {1}/{2}-{3}.out 2> {1}/{2}-{3}.err &'.format(
+            self.cmd('{0} > {3}.out 2> {3}.err &'.format(
                 daemon_path, self.logdir, self.name, daemon
             ))
             self.waitOutput()
@@ -680,7 +693,41 @@ class Router(Node):
     def getStdOut(self, daemon):
         return self.getLog('out', daemon)
     def getLog(self, log, daemon):
-        return self.cmd('cat {}/{}-{}.{}'.format(self.logdir, self.name, daemon, log))
+        return self.cmd('cat {}/{}/{}.{}'.format(self.logdir, self.name, daemon, log))
+
+    def checkRouterCores(self, reportLeaks=True, reportOnce=False):
+        if reportOnce and not self.reportCores:
+            return
+        reportMade = False
+        for daemon in self.daemons:
+            if (self.daemons[daemon] == 1):
+                # Look for core file
+                corefiles = glob.glob('{}/{}/{}_core*.dmp'.format(
+                    self.logdir, self.name, daemon))
+                if (len(corefiles) > 0):
+                    daemon_path = os.path.join(self.daemondir, daemon)
+                    backtrace = subprocess.check_output([
+                        "gdb {} {} --batch -ex bt 2> /dev/null".format(daemon_path, corefiles[0])
+                    ], shell=True)
+                    sys.stderr.write("\n%s: %s crashed. Core file found - Backtrace follows:\n" % (self.name, daemon))
+                    sys.stderr.write("%s" % backtrace)
+                    reportMade = True
+                elif reportLeaks:
+                    log = self.getStdErr(daemon)
+                    if "memstats" in log:
+                        sys.stderr.write("%s: %s has memory leaks:\n" % (self.name, daemon))
+                        log = re.sub("core_handler: ", "", log)
+                        log = re.sub(r"(showing active allocations in memory group [a-zA-Z0-9]+)", r"\n  ## \1", log)
+                        log = re.sub("memstats:  ", "    ", log)
+                        sys.stderr.write(log)
+                        reportMade = True
+                # Look for AddressSanitizer Errors and append to /tmp/AddressSanitzer.txt if found
+                if checkAddressSanitizerError(self.getStdErr(daemon), self.name, daemon):
+                    sys.stderr.write("%s: Daemon %s killed by AddressSanitizer" % (self.name, daemon))
+                    reportMade = True
+        if reportMade:
+            self.reportCores = False
+
     def checkRouterRunning(self):
         "Check if router daemons are running and collect crashinfo they don't run"
 
@@ -695,7 +742,7 @@ class Router(Node):
             if (self.daemons[daemon] == 1) and not (daemon in daemonsRunning):
                 sys.stderr.write("%s: Daemon %s not running\n" % (self.name, daemon))
                 # Look for core file
-                corefiles = glob.glob('{}/{}_{}_core*.dmp'.format(
+                corefiles = glob.glob('{}/{}/{}_core*.dmp'.format(
                     self.logdir, self.name, daemon))
                 if (len(corefiles) > 0):
                     daemon_path = os.path.join(self.daemondir, daemon)
@@ -706,9 +753,9 @@ class Router(Node):
                     sys.stderr.write("%s\n" % backtrace)
                 else:
                     # No core found - If we find matching logfile in /tmp, then print last 20 lines from it.
-                    if os.path.isfile('{}/{}-{}.log'.format(self.logdir, self.name, daemon)):
+                    if os.path.isfile('{}/{}/{}.log'.format(self.logdir, self.name, daemon)):
                         log_tail = subprocess.check_output([
-                            "tail -n20 {}/{}-{}.log 2> /dev/null".format(
+                            "tail -n20 {}/{}/{}.log 2> /dev/null".format(
                                 self.logdir, self.name, daemon)
                             ], shell=True)
                         sys.stderr.write("\nFrom %s %s %s log file:\n" % (self.routertype, self.name, daemon))
