@@ -573,8 +573,7 @@ class TopoRouter(TopoGear):
         #setup the per node directory
         dir = '{}/{}'.format(self.logdir, self.name)
         os.system('mkdir -p ' + dir)
-        os.system('chmod 775 ' + dir)
-        os.system('chgrp {} {}'.format(self.routertype, dir))
+        os.system('chmod -R go+rw /tmp/topotests')
 
         # Open router log file
         logfile = '{0}/{1}.log'.format(dir, name)
@@ -650,12 +649,13 @@ class TopoRouter(TopoGear):
         nrouter = self.tgen.net[self.name]
         result = nrouter.startRouter(self.tgen)
 
-        # Enable all daemon logging files and set them to the logdir.
+        # Enable all daemon command logging, logging files
+        # and set them to the start dir.
         for daemon, enabled in nrouter.daemons.iteritems():
             if enabled == 0:
                 continue
-            self.vtysh_cmd('configure terminal\nlog file {}/{}/{}.log'.format(
-                self.logdir, self.name, daemon), daemon=daemon)
+            self.vtysh_cmd('configure terminal\nlog commands\nlog file {}.log'.format(
+                daemon), daemon=daemon)
 
         if result != '':
             self.tgen.set_error(result)

@@ -59,6 +59,24 @@ class json_cmp_result(object):
         "Returns True if there were errors, otherwise False."
         return len(self.errors) > 0
 
+def get_test_logdir(node=None, init=False):
+    """
+    Return the current test log directory based on PYTEST_CURRENT_TEST
+    environment variable.
+    Optional paramters:
+    node:  when set, adds the node specific log directory to the init dir
+    init:  when set, initializes the log directory and fixes path permissions
+    """
+    cur_test = os.environ['PYTEST_CURRENT_TEST']
+
+    ret = '/tmp/topotests/' + cur_test[0:cur_test.find(".py")].replace('/','.')
+    if node != None:
+        dir = ret + "/" + node
+    if init:
+        os.system('mkdir -p ' + dir)
+        os.system('chmod -R go+rw /tmp/topotests')
+    return ret
+
 def json_diff(d1, d2):
     """
     Returns a string with the difference between JSON data.
@@ -462,7 +480,7 @@ class Router(Node):
 
     def __init__(self, name, **params):
         super(Router, self).__init__(name, **params)
-        self.logdir = params.get('logdir', '/tmp')
+        self.logdir = params.get('logdir', get_test_logdir(name, True))
         self.daemondir = None
         self.hasmpls = False
         self.routertype = 'frr'
@@ -540,6 +558,8 @@ class Router(Node):
         set_sysctl(self, 'net.ipv4.ip_forward', 0)
         set_sysctl(self, 'net.ipv6.conf.all.forwarding', 0)
         super(Router, self).terminate()
+        os.system('chmod -R go+rw /tmp/topotests')
+
     def stopRouter(self, wait=True):
         # Stop Running Quagga or FRR Daemons
         rundaemons = self.cmd('ls -1 /var/run/%s/*.pid' % self.routertype)
@@ -661,6 +681,7 @@ class Router(Node):
         # Starts actual daemons without init (ie restart)
         # cd to per node directory
         self.cmd('cd {}/{}'.format(self.logdir, self.name))
+        self.cmd('umask 000')
         #Re-enable to allow for report per run
         self.reportCores = True
         # Start Zebra first
