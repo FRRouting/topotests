@@ -489,6 +489,7 @@ class Router(Node):
                         'ldpd': 0, 'eigrpd': 0, 'nhrpd': 0}
         self.daemons_options = {'zebra': ''}
         self.reportCores = True
+        self.version = None
 
     def _config_frr(self, **params):
         "Configure FRR binaries"
@@ -560,11 +561,12 @@ class Router(Node):
         super(Router, self).terminate()
         os.system('chmod -R go+rw /tmp/topotests')
 
-    def stopRouter(self, wait=True):
+    def stopRouter(self, wait=True, assertOnError=True, minErrorVersion='5.0'):
         # Stop Running Quagga or FRR Daemons
         rundaemons = self.cmd('ls -1 /var/run/%s/*.pid' % self.routertype)
+        errors = ""
         if re.search(r"No such file or directory", rundaemons):
-            return
+            return errors
         if rundaemons is not None:
             numRunning = 0
             for d in StringIO.StringIO(rundaemons):
@@ -592,7 +594,13 @@ class Router(Node):
                         self.waitOutput()
                     self.cmd('rm -- {}'.format(d.rstrip()))
         if wait:
-                self.checkRouterCores(reportOnce=True)
+                errors = self.checkRouterCores(reportOnce=True)
+                if self.checkRouterVersion('<', minErrorVersion):
+                    #ignore errors in old versions
+                    errors = ""
+                if assertOnError and len(errors) > 0:
+                    assert "Errors found - details follow:" == 0, errors
+        return errors
 
     def removeIPs(self):
         for interface in self.intfNames():
@@ -684,6 +692,9 @@ class Router(Node):
         self.cmd('umask 000')
         #Re-enable to allow for report per run
         self.reportCores = True
+        if self.version == None:
+            self.version = self.cmd(os.path.join(self.daemondir, 'bgpd')+' -v').split()[2]
+            logger.info('{}: running version: {}'.format(self.name,self.version))
         # Start Zebra first
         if self.daemons['zebra'] == 1:
             zebra_path = os.path.join(self.daemondir, 'zebra')
@@ -720,6 +731,7 @@ class Router(Node):
         if reportOnce and not self.reportCores:
             return
         reportMade = False
+        traces = ""
         for daemon in self.daemons:
             if (self.daemons[daemon] == 1):
                 # Look for core file
@@ -732,11 +744,13 @@ class Router(Node):
                     ], shell=True)
                     sys.stderr.write("\n%s: %s crashed. Core file found - Backtrace follows:\n" % (self.name, daemon))
                     sys.stderr.write("%s" % backtrace)
+                    traces = traces + "\n%s: %s crashed. Core file found - Backtrace follows:\n%s" % (self.name, daemon, backtrace)
                     reportMade = True
                 elif reportLeaks:
                     log = self.getStdErr(daemon)
                     if "memstats" in log:
                         sys.stderr.write("%s: %s has memory leaks:\n" % (self.name, daemon))
+                        traces = traces + "\n%s: %s has memory leaks:\n" % (self.name, daemon)
                         log = re.sub("core_handler: ", "", log)
                         log = re.sub(r"(showing active allocations in memory group [a-zA-Z0-9]+)", r"\n  ## \1", log)
                         log = re.sub("memstats:  ", "    ", log)
@@ -745,9 +759,11 @@ class Router(Node):
                 # Look for AddressSanitizer Errors and append to /tmp/AddressSanitzer.txt if found
                 if checkAddressSanitizerError(self.getStdErr(daemon), self.name, daemon):
                     sys.stderr.write("%s: Daemon %s killed by AddressSanitizer" % (self.name, daemon))
+                    traces = traces + "\n%s: Daemon %s killed by AddressSanitizer" % (self.name, daemon)
                     reportMade = True
         if reportMade:
             self.reportCores = False
+        return traces
 
     def checkRouterRunning(self):
         "Check if router daemons are running and collect crashinfo they don't run"
@@ -788,6 +804,37 @@ class Router(Node):
 
                 return "%s: Daemon %s not running" % (self.name, daemon)
         return ""
+
+    def checkRouterVersion(self, cmpop, version):
+        """
+        Compares router version using operation `cmpop` with `version`.
+        Valid `cmpop` values:
+        * `>=`: has the same version or greater
+        * '>': has greater version
+        * '=': has the same version
+        * '<': has a lesser version
+        * '<=': has the same version or lesser
+
+        Usage example: router.checkRouterVersion('>', '1.0')
+        """
+        rversion = self.version
+        if rversion is None:
+            return False
+
+        result = version_cmp(rversion, version)
+        if cmpop == '>=':
+            return result >= 0
+        if cmpop == '>':
+            return result > 0
+        if cmpop == '=':
+            return result == 0
+        if cmpop == '<':
+            return result < 0
+        if cmpop == '<':
+            return result < 0
+        if cmpop == '<=':
+            return result <= 0
+
     def get_ipv6_linklocal(self):
         "Get LinkLocal Addresses from interfaces"
 
