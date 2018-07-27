@@ -47,15 +47,6 @@
           "interface": "r3-eth1",
           "metric": "20",
           "next-hop": "r5",
-          "parent": "r5(4)",
-          "type": "pseudo_TE-IS",
-          "vertex": "r5"
-        },
-        {
-          "interface": "r3-eth1",
-          "metric": "20",
-          "next-hop": "r5",
-          "parent": "r5(2)",
           "type": "TE-IS",
           "vertex": "r4"
         },
@@ -84,7 +75,7 @@
           "metric": "internal",
           "parent": "0",
           "type": "IP6",
-          "vertex": "2001:db8:1:1::/64"
+          "vertex": "2001:db8:2:1::/64"
         },
         {
           "interface": "r3-eth1",
@@ -96,15 +87,13 @@
         },
         {
           "interface": "r5",
-          "metric": "internal",
           "next-hop": "10",
           "parent": "r3-eth1",
           "type": "IP6",
-          "vertex": "2001:db8:1:2::/64"
+          "vertex": "2001:db8:2:2::/64"
         },
         {
           "interface": "r5",
-          "metric": "internal",
           "next-hop": "10",
           "parent": "r3-eth1",
           "type": "IP6",
@@ -114,29 +103,18 @@
           "interface": "r3-eth1",
           "metric": "20",
           "next-hop": "r5",
-          "parent": "r5(4)",
-          "type": "pseudo_TE-IS",
-          "vertex": "r5"
-        },
-        {
-          "interface": "r3-eth1",
-          "metric": "20",
-          "next-hop": "r5",
-          "parent": "r5(2)",
           "type": "TE-IS",
           "vertex": "r4"
         },
         {
           "interface": "r5",
-          "metric": "internal",
           "next-hop": "20",
           "parent": "r3-eth1",
           "type": "IP6",
-          "vertex": "2001:db8:2:2::/64"
+          "vertex": "2001:db8:1:2::/64"
         },
         {
           "interface": "r5",
-          "metric": "internal",
           "next-hop": "20",
           "parent": "r3-eth1",
           "type": "IP6",
@@ -188,7 +166,7 @@
           "metric": "internal",
           "parent": "0",
           "type": "IP6",
-          "vertex": "2001:db8:2:1::/64"
+          "vertex": "2001:db8:1:1::/64"
         },
         {
           "interface": "r3-eth0",
@@ -200,15 +178,6 @@
         },
         {
           "interface": "r1",
-          "metric": "internal",
-          "next-hop": "10",
-          "parent": "r3-eth0",
-          "type": "IP6",
-          "vertex": "2001:db8:1:1::/64"
-        },
-        {
-          "interface": "r1",
-          "metric": "internal",
           "next-hop": "10",
           "parent": "r3-eth0",
           "type": "IP6",

@@ -89,6 +89,45 @@ def json_diff(d1, d2):
     dstr2 = json.dumps(d2, **json_format_opts)
     return difflines(dstr2, dstr1, title1='Expected value', title2='Current value', n=0)
 
+
+def _json_list_cmp(list1, list2, parent, result):
+    "Handles list type entries."
+    # Check second list2 type
+    if not isinstance(list1, type([])) or not isinstance(list2, type([])):
+        result.add_error(
+            '{} has different type than expected '.format(parent) +
+            '(have {}, expected {}):\n{}'.format(
+                type(list1), type(list2), json_diff(list1, list2)))
+        return
+
+    # Check list size
+    if len(list2) > len(list1):
+        result.add_error(
+            '{} too few items '.format(parent) +
+            '(have {}, expected {}:\n {})'.format(
+                len(list1), len(list2),
+                json_diff(list1, list2)))
+        return
+
+    # List all unmatched items errors
+    unmatched = []
+    for expected in list2:
+        matched = False
+        for value in list1:
+            if json_cmp({'json': value}, {'json': expected}) is None:
+                matched = True
+                break
+
+        if not matched:
+            unmatched.append(expected)
+
+    # If there are unmatched items, error out.
+    if unmatched:
+        result.add_error(
+            '{} value is different (\n{})'.format(
+                parent, json_diff(list1, list2)))
+
+
 def json_cmp(d1, d2):
     """
     JSON compare function. Receives two parameters:
@@ -102,11 +141,20 @@ def json_cmp(d1, d2):
     """
     squeue = [(d1, d2, 'json')]
     result = json_cmp_result()
+
     for s in squeue:
         nd1, nd2, parent = s
-        s1, s2 = set(nd1), set(nd2)
+
+        # Handle JSON beginning with lists.
+        if isinstance(nd1, type([])) or isinstance(nd2, type([])):
+            _json_list_cmp(nd1, nd2, parent, result)
+            if result.has_errors():
+                return result
+            else:
+                return None
 
         # Expect all required fields to exist.
+        s1, s2 = set(nd1), set(nd2)
         s2_req = set([key for key in nd2 if nd2[key] is not None])
         diff = s2_req - s1
         if diff != set({}):
@@ -119,6 +167,7 @@ def json_cmp(d1, d2):
                 result.add_error('"{}" should not exist in {} (have {}):\n{}'.format(
                     key, parent, str(s1), json_diff(nd1[key], nd2[key])))
                 continue
+
             # If nd1 key is a dict, we have to recurse in it later.
             if isinstance(nd2[key], type({})):
                 if not isinstance(nd1[key], type({})):
@@ -130,42 +179,10 @@ def json_cmp(d1, d2):
                 nparent = '{}["{}"]'.format(parent, key)
                 squeue.append((nd1[key], nd2[key], nparent))
                 continue
+
             # Check list items
             if isinstance(nd2[key], type([])):
-                if not isinstance(nd1[key], type([])):
-                    result.add_error(
-                        '{}["{}"] has different type than expected '.format(parent, key) +
-                        '(have {}, expected {}):\n{}'.format(
-                            type(nd1[key]), type(nd2[key]), json_diff(nd1[key], nd2[key])))
-                    continue
-                # Check list size
-                if len(nd2[key]) > len(nd1[key]):
-                    result.add_error(
-                        '{}["{}"] too few items '.format(parent, key) +
-                        '(have {}, expected {}:\n {})'.format(
-                            len(nd1[key]), len(nd2[key]),
-                            json_diff(nd1[key], nd2[key])))
-                    continue
-
-                # List all unmatched items errors
-                unmatched = []
-                for expected in nd2[key]:
-                    matched = False
-                    for value in nd1[key]:
-                        if json_cmp({'json': value}, {'json': expected}) is None:
-                            matched = True
-                            break
-
-                    if matched:
-                        break
-                    if not matched:
-                        unmatched.append(expected)
-
-                # If there are unmatched items, error out.
-                if unmatched:
-                    result.add_error(
-                        '{}["{}"] value is different (\n{})'.format(
-                            parent, key, json_diff(nd1[key], nd2[key])))
+                _json_list_cmp(nd1[key], nd2[key], parent, result)
                 continue
 
             # Compare JSON values
@@ -179,6 +196,7 @@ def json_cmp(d1, d2):
         return result
 
     return None
+
 
 def run_and_expect(func, what, count=20, wait=3):
     """
@@ -264,6 +282,22 @@ def normalize_text(text):
     text = re.sub(r'[ \t]+', ' ', text)
     text = re.sub(r'\r', '', text)
     return text
+
+def module_present(module, load=True):
+    """
+    Returns whether `module` is present.
+
+    If `load` is true, it will try to load it via modprobe.
+    """
+    with open('/proc/modules', 'r') as modules_file:
+        if module.replace('-','_') in modules_file.read():
+            return True
+    cmd = '/sbin/modprobe {}{}'.format('' if load else '-n ',
+                                       module)
+    if os.system(cmd) != 0:
+        return False
+    else:
+        return True
 
 def version_cmp(v1, v2):
     """
@@ -673,9 +707,9 @@ class Router(Node):
             else:
                 # Test for MPLS Kernel modules available
                 self.hasmpls = False
-                if os.system('/sbin/modprobe mpls-router') != 0:
+                if not module_present('mpls-router'):
                     logger.info('MPLS tests will not run (missing mpls-router kernel module)')
-                elif os.system('/sbin/modprobe mpls-iptunnel') != 0:
+                elif not module_present('mpls-iptunnel'):
                     logger.info('MPLS tests will not run (missing mpls-iptunnel kernel module)')
                 else:
                     self.hasmpls = True
@@ -884,12 +918,12 @@ class Router(Node):
         if (daemon == 'ldpd'):
             if version_cmp(platform.release(), '4.5') < 0:
                 return False
-            if self.cmd('/sbin/modprobe -n mpls-router' ) != "":
+            if not module_present('mpls-router', load=False):
                 return False
-            if self.cmd('/sbin/modprobe -n mpls-iptunnel') != "":
+            if not module_present('mpls-iptunnel', load=False):
                 return False
-
         return True
+
     def get_routertype(self):
         "Return the type of Router (frr or quagga)"
 
