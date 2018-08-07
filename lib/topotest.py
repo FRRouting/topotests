@@ -27,6 +27,7 @@ import os
 import errno
 import re
 import sys
+import functools
 import glob
 import StringIO
 import subprocess
@@ -198,6 +199,24 @@ def json_cmp(d1, d2):
     return None
 
 
+def router_output_cmp(router, cmd, expected):
+    """
+    Runs `cmd` in router and compares the output with `expected`.
+    """
+    return difflines(normalize_text(router.vtysh_cmd(cmd)),
+                     normalize_text(expected),
+                     title1="Current output",
+                     title2="Expected output")
+
+
+def router_json_cmp(router, cmd, data):
+    """
+    Runs `cmd` that returns JSON data (normally the command ends with 'json')
+    and compare with `data` contents.
+    """
+    return json_cmp(router.vtysh_cmd(cmd, isjson=True), data)
+
+
 def run_and_expect(func, what, count=20, wait=3):
     """
     Run `func` and compare the result with `what`. Do it for `count` times
@@ -206,14 +225,39 @@ def run_and_expect(func, what, count=20, wait=3):
 
     Returns (True, func-return) on success or
     (False, func-return) on failure.
+
+    ---
+
+    Helper functions to use with this function:
+    - router_output_cmp
+    - router_json_cmp
     """
+    start_time = time.time()
+    func_name = "<unknown>"
+    if func.__class__ == functools.partial:
+        func_name = func.func.__name__
+    else:
+        func_name = func.__name__
+
+    logger.info(
+        "'{}' polling started (interval {} secs, maximum wait {} secs)".format(
+            func_name, wait, int(wait * count)))
+
     while count > 0:
         result = func()
         if result != what:
             time.sleep(wait)
             count -= 1
             continue
+
+        end_time = time.time()
+        logger.info("'{}' succeeded after {:.2f} seconds".format(
+            func_name, end_time - start_time))
         return (True, result)
+
+    end_time = time.time()
+    logger.error("'{}' failed after {:.2f} seconds".format(
+        func_name, end_time - start_time))
     return (False, result)
 
 
@@ -277,10 +321,16 @@ def get_file(content):
 
 def normalize_text(text):
     """
-    Strips formating spaces/tabs and carriage returns.
+    Strips formating spaces/tabs, carriage returns and trailing whitespace.
     """
     text = re.sub(r'[ \t]+', ' ', text)
     text = re.sub(r'\r', '', text)
+
+    # Remove whitespace in the middle of text.
+    text = re.sub(r'[ \t]+\n', '\n', text)
+    # Remove whitespace at the end of the text.
+    text = text.rstrip()
+
     return text
 
 def module_present(module, load=True):
