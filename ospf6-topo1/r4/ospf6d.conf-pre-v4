@@ -1,4 +1,4 @@
-hostname r2
+hostname r4
 log file ospf6d.log
 !
 debug ospf6 message all
@@ -9,18 +9,18 @@ debug ospf6 neighbor
 debug ospf6 route table
 debug ospf6 flooding
 !
-interface r2-stubnet
+interface r4-stubnet
  ipv6 ospf6 network broadcast
 !
-interface r2-sw5
+interface r4-sw6
  ipv6 ospf6 network broadcast
 !
 router ospf6
- ospf6 router-id 10.0.0.2
+ router-id 10.0.0.4
  log-adjacency-changes detail
  redistribute static
- interface r2-stubnet area 0.0.0.0
- interface r2-sw5 area 0.0.0.0
+ interface r4-stubnet area 0.0.0.1
+ interface r4-sw6 area 0.0.0.1
 !
 line vty
  exec-timeout 0 0
