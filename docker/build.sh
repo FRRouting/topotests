@@ -22,49 +22,7 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-FRR_DIR=/root/frr
-FRR_BUILD_DIR=/root/frr-build
-TOPOTESTS_DIR=/root/topotests
-
-[ -z $CLEAN ] && CLEAN=0
-[ -z $VERBOSE ] && VERBOSE=1
-[ -z $DOC ] && DOC=0
-[ -z $SANITIZER ] && SANITIZER=1
-[ -z $SYNC_SOURCE ] && SYNC_SOURCE=0
-
-log_info() {
-  local msg=$1
-
-  echo -e "=> $msg"
-}
-
-log_error() {
-  local msg=$1
-
-  echo -e "E: $msg" 2>&1
-}
-
-log_warning() {
-  local msg=$1
-
-  echo -e "W: $msg" 2>&1
-}
-
-log_fatal() {
-  local msg=$1
-
-  echo -e "F: $msg" 2>&1
-
-  exit 1
-}
-
-cpu_count() {
-  local cpu_count
-
-  cpu_count=$(cat /proc/cpuinfo  | grep -w processor | wc -l)
-  if [ $? -eq 0 ]; then
-    echo -n $cpu_count
-  else
-    echo -n 2
-  fi
-}
+exec docker build --pull \
+		  --compress \
+		  -t frrouting/topotests \
+		  .

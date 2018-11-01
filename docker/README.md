@@ -1,23 +1,48 @@
 # Topotests in Docker
 
-This is folder contains auxiliary scripts to automate or help deploying
-topology tests under Docker on a standardized Ubuntu environment.
+## Quickstart
 
-Files description:
+If you have Docker installed, you can run the topotests in Docker.
+The easiest way to do this, is to use the `frr-topotests.sh` script
+from this repository:
 
-* _funcs.sh_: shared bash code
-* _docker.sh_: builds docker image to run topotests
-* _compile_frr.sh_: compile FRR sources (should be used by `topotests_run.sh`)
-* _topotests_run.sh_: runs topotest image with the selected command
+```console
+wget -O /usr/local/bin/frr-topotests \
+    https://raw.githubusercontent.com/frrouting/topotests/master/docker/frr-topotests.sh
+chmod +x /usr/local/bin/frr-topotests
+```
 
-## Running Topotests in Docker
+Once this script is in place, simply run it while you are inside your FRR repository:
 
-All you need to run topotests in Docker is:
+```console
+frr-topotests
+```
 
-* Have Docker installed (tested against docker-ce[1])
-* Build the topotest images
-* Have the FRR/Topotest sources cloned in your machine
+## Advanced Usage
 
-Review and configure your sources folder in `topotests_run.sh`.
+There are several environtment variables which can be used to modify the behavior of
+the image. Those can be listed using `frr-topotests -h`.
 
-[1]: https://docs.docker.com/install/linux/docker-ce/ubuntu/
+For example, a volume is used to cache build artifacts between multiple runs
+of the image. If you need to force a complete recompile, you can set `TOPOTEST_CLEAN`:
+
+```console
+TOPOTEST_CLEAN=1 frr-topotests
+```
+
+By default, `frr-topotests` will execute pytest without any arguments. If you append an
+arguments with the first one starting with `/` or `./`, they will replace the call to
+pytest. If the appended arguments do not match this patttern, they will be provided to
+pytest as arguments.
+
+So, to run a specific test with more verbose logging:
+
+```console
+frr-topotests -vv -s all-protocol-startup/test_all_protocol_startup.py
+```
+
+And to compile FRR but drop into a shell instead of running pytest:
+
+```console
+frr-topotests /bin/bash
+```

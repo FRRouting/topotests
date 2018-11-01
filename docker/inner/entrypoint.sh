@@ -22,30 +22,23 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-
-# Source folders
-FRR_DIR=$HOME/src/frr
-TOPOTESTS_DIR=$HOME/src/topotests
-
+# Load shared functions
+CDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. $CDIR/funcs.sh
 
 #
 # Script begin
 #
-CMD=$1
-if [ -z $1 ]; then
-  CMD=bash
+"${CDIR}/compile_frr.sh"
+"${CDIR}/openvswitch.sh"
+
+log_info "Setting permissions on /tmp so we can generate logs"
+chmod 1777 /tmp
+
+if [ $# -eq 0 ] || ([[ "$1" != /* ]] && [[ "$1" != ./* ]]); then
+	export TOPOTESTS_CHECK_MEMLEAK=/tmp/memleak_
+	export TOPOTESTS_CHECK_STDERR=Yes
+	set -- pytest --junitxml /tmp/topotests.xml "$@"
 fi
 
-docker run --rm -ti \
-  -v "/lib/modules:/lib/modules" \
-  -v "/tmp/topotests_logs:/tmp" \
-  -v "$FRR_DIR:/root/frr:ro" \
-  -v "$TOPOTESTS_DIR:/root/topotests:ro" \
-  -v "/tmp/.X11-unix:/tmp/.X11-unix" \
-  -v "$HOME/.Xauthority:/root/.Xauthority" \
-  -e DISPLAY=$DISPLAY \
-  --net=host \
-  --privileged \
-  topotests
-
-exit 0
+exec "$@"
