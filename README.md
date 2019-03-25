@@ -1,3 +1,10 @@
+# Archived
+
+This repository has been merged with FRR's main codebase at
+[`tests/topotests`](https://github.com/FRRouting/frr/tree/master/tests/topotests]).
+
+Development continues there.
+
 # FRRouting Topology Tests with Mininet
 
 ## Guidelines
